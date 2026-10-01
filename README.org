@@ -123,6 +123,17 @@ You could then run:
   emacsclient -n -e '(yequake-toggle "org-capture")'
 #+END_SRC
 
+To capture into a specific template, pass its key as a single
+buffer-fn entry with arguments.  Note the double parentheses: the
+entry is a call list, not several separate buffer-fns
+(a single-pair buffer-fn like ~(yequake-org-capture nil "t")~ is
+split into separate entries, so the keys argument is dropped and the
+string is treated as a file to open):
+
+#+BEGIN_SRC elisp
+  (buffer-fns . ((yequake-org-capture nil "t")))
+#+END_SRC
+
 And after the capture is finalized or canceled, the frame will be closed, like this:
 
 [[images/org-capture.gif]]
@@ -131,6 +142,12 @@ And after the capture is finalized or canceled, the frame will be closed, like t
 :PROPERTIES:
 :TOC:      0
 :END:
+
+** Unreleased
+
++ ~buffer-fns~ entries may now be lists of the form ~(FUNCTION . ARGS)~, e.g. ~((yequake-org-capture nil "t"))~ to pass ~KEYS~ to ~yequake-org-capture~.
++ ~yequake--show-buffers~ stops after an entry returns nil (e.g. a cancelled ~org-capture~ that toggled the frame away), instead of continuing to open remaining entries in whatever frame became current.  Previously a buffer-fn like ~(yequake-org-capture nil "t")~ was split into separate entries, dropping the ~KEYS~ argument and opening a stray file named after the key in the other frame (issue #6).
++ Override the function ~org-switch-to-buffer-other-window~ only on Org <9.7; on Org 9.7+ ~org-capture~ calls ~switch-to-buffer-other-window~ directly, so Yequake now overrides that instead.
 
 ** 0.1
 

@@ -104,8 +104,12 @@ Each value should be an alist setting at least these keys:
 `buffer-fns': List of functions and strings used to display
 buffers.  Each entry should be either a function, which returns a
 buffer to display or splits the window and does not return a
-buffer, or a string, which either names an existing buffer or is
-the path to a file to display.
+buffer, a string, which either names an existing buffer or is the
+path to a file to display, or a list of the form (FUNCTION . ARGS),
+which calls FUNCTION with ARGS.  For example, to call
+`yequake-org-capture' with KEYS:
+
+    (buffer-fns . ((yequake-org-capture nil \"t\")))
 
 `width': An integer pixel width, or a float fraction of the
 monitor width.
@@ -227,22 +231,31 @@ See Info node `(elisp)Frame Parameters'."
         new-frame))))
 
 (defun yequake--show-buffers (buffer-fns)
-  "Show buffers returned by each function in BUFFER-FNS."
+  "Show buffers returned by each entry in BUFFER-FNS.
+An entry is a buffer/file name string, a function, or a list
+(FUNCTION . ARGS), which calls FUNCTION with ARGS.  If an entry returns nil,
+it has handled the frame itself (e.g. an aborted org-capture toggled it
+away), so the remaining entries are not shown."
   ;; FIXME: These can also be "window functions".  Should rename, and define obsolete alias for old variable.
   (cl-flet ((act (it) (cl-typecase it
                         (string (or (get-buffer it)
                                     (find-buffer-visiting it)
                                     (find-file-noselect it)))
-                        (function (funcall it)))))
+                        (function (funcall it))
+                        (list (apply (car it) (cdr it))))))
     (let ((split-width-threshold 0)
           (split-height-threshold 0))
-      ;; Switch to first buffer, pop to the rest.
-      (switch-to-buffer (act (car buffer-fns)))
-      (dolist (fn (cdr buffer-fns))
-        (when-let* ((ret (act fn)))
-          (cl-typecase ret
-            (window (select-window ret))
-            (buffer (display-buffer-same-window ret nil))))))))
+      ;; Switch to first buffer, then display the rest.  A nil result stops
+      ;; further processing: continuing would display into whatever frame
+      ;; became current after the entry (e.g. an aborted capture) deleted
+      ;; the Yequake frame.
+      (when-let* ((result (act (car buffer-fns))))
+        (switch-to-buffer result)
+        (dolist (fn (cdr buffer-fns))
+          (when-let* ((ret (act fn)))
+            (cl-typecase ret
+              (window (select-window ret))
+              (buffer (display-buffer-same-window ret nil)))))))))
 
 (defun yequake--focus-in ()
   "Set `yequake-focused' to t.
@@ -273,18 +286,29 @@ will be toggled."
     ;; it always uses `switch-to-buffer-other-window', and we want to
     ;; display the template menu and capture buffer in the existing
     ;; window rather than splitting the frame.
-    (cl-letf* (((symbol-function #'org-switch-to-buffer-other-window)
-                (symbol-function #'switch-to-buffer)))
-      (condition-case nil
-          (progn
-            (org-capture goto keys)
-            ;; Be sure to return the "CAPTURE-" buffer, which is the current
-            ;; buffer at this point.
-            (current-buffer))
-        ((error quit)
-         ;; Capture aborted: remove the hook and hide the capture frame.
-         (remove-hook 'org-capture-after-finalize-hook #'yequake-retoggle)
-         (yequake-retoggle))))))
+    ;; Org >=9.7 deprecated `org-switch-to-buffer-other-window' (now only a
+    ;; compat shim) and its org-capture callers call
+    ;; `switch-to-buffer-other-window' directly.  Override whichever one the
+    ;; running org-capture uses, so the template menu and capture buffer stay
+    ;; in the existing window instead of splitting the frame.
+    (require 'org-capture nil t)
+    (let* ((modern-org (and (fboundp 'org-version)
+                            (not (version< (org-version) "9.7"))))
+           (target (if modern-org
+                       'switch-to-buffer-other-window
+                     'org-switch-to-buffer-other-window)))
+      (cl-letf* (((symbol-function target)
+                  (symbol-function #'switch-to-buffer)))
+        (condition-case nil
+            (progn
+              (org-capture goto keys)
+              ;; Be sure to return the "CAPTURE-" buffer, which is the current
+              ;; buffer at this point.
+              (current-buffer))
+          ((error quit)
+           ;; Capture aborted: remove the hook and hide the capture frame.
+           (remove-hook 'org-capture-after-finalize-hook #'yequake-retoggle)
+           (yequake-retoggle)))))))
 
 ;;;; Footer
 
